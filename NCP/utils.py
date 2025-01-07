@@ -90,6 +90,7 @@ def cross_cov(A, B, rowvar=True, bias=False, centered=True):
         return C / (A.shape[1] - 1)
 
 def filter_reduced_rank_svals(values, vectors):
+    # FIXME: torch.eigh returns only real eigenvalues; is it necessary to check whether the values are complex?
     eps = 2 * torch.finfo(torch.get_default_dtype()).eps
     # Filtering procedure.
     # Create a mask which is True when the real part of the eigenvalue is negative or the imaginary part is nonzero
@@ -97,6 +98,15 @@ def filter_reduced_rank_svals(values, vectors):
                                   torch.imag(values) != 0
                                   if torch.is_complex(values)
                                   else torch.zeros(len(values), device=values.device))
+
+    #FIXME: If all values are invalid, return just the largest one
+    if torch.all(is_invalid):
+        spared_idx = torch.real(values).argmax()
+        values = values[spared_idx].real.reshape(1)
+        vectors = vectors[:, spared_idx].reshape(-1, 1)
+
+        return torch.real(values), torch.real(vectors)
+
     # Check if any is invalid take the first occurrence of a True value in the mask and filter everything after that
     if torch.any(is_invalid):
         values = values[~is_invalid].real

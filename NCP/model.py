@@ -128,6 +128,58 @@ class NCPOperator(Module):
         return to_np(fY_sorted), to_np(pdf)
 
     def _compute_data_statistics(self, X, Y):
+        #NOTE: This forces singular values to be at most 1; is this OK?
+        sigma = torch.sqrt(torch.exp(-self.S.weights ** 2))
+        Ux = self.U(X.type_as(sigma))
+        Vy = self.V(Y.type_as(sigma))
+        self._mean_Ux = torch.mean(Ux, axis=0)
+        self._mean_Vy = torch.mean(Vy, axis=0)
+
+        Ux_centered = Ux - torch.outer(torch.ones(Ux.shape[0]).type_as(Ux), self._mean_Ux)
+        Vy_centered = Vy - torch.outer(torch.ones(Vy.shape[0]).type_as(Vy), self._mean_Vy)
+
+        Ux_centered = Ux_centered @ torch.diag(sigma)
+        Vy_centered = Vy_centered @ torch.diag(sigma)
+
+        # FIXME: Doesn't torch already center the variables?
+        cov_X = torch.cov(Ux_centered.T)
+        cov_Y = torch.cov(Vy_centered.T)
+        # FIXME: Doesn't torch already support cross-covariance in 'torch.cov'
+        cov_XY = cross_cov(Ux_centered.T, Vy_centered.T)
+
+        #FIXME: hack for sqrtmh not to except on cov_X.shape = 0d
+        if Ux.shape[1] == 1:
+            cov_X = cov_X.reshape(1,1)
+            cov_Y = cov_Y.reshape(1,1)
+
+        # write in a stable way
+        self._sqrt_cov_X_inv = torch.linalg.pinv(sqrt_hermitian(cov_X))
+        self._sqrt_cov_Y_inv = torch.linalg.pinv(sqrt_hermitian(cov_Y))
+
+        M = self._sqrt_cov_X_inv @ cov_XY @ self._sqrt_cov_Y_inv
+        e_val, sing_vec_l = torch.linalg.eigh(M @ M.T)
+        e_val, self._sing_vec_l = filter_reduced_rank_svals(e_val, sing_vec_l)
+        self._sing_val = torch.sqrt(e_val)
+        self._sing_vec_r = (M.T @ self._sing_vec_l) / self._sing_val
+
+    def _compute_conditional_independence_statistic(self, X, Y):
+        def rbf_kernel(X, gamma=None):
+            """Naive reimplementation of 'sklearn.metrics.pairwise.rbf_kernel' in torch."""
+            if gamma is None:
+                gamma = 1.0 / X.shape[1]
+
+            K = torch.sum(X**2, dim=1) - 2*X@X.T + torch.sum(X**2, dim=1).reshape(-1, 1)
+            K = torch.exp(-gamma * K)
+            return K
+        # FIXME: The dimensions of X and Z should be accessible somehow
+        #        Also, the gram matrix could be stored in GPU memory if we continue
+        #        doing full-batch
+        Z = X[:, 1:] # this assumes X is 1-dimensional
+        gram_matrix_Z = rbf_kernel(Z)
+        gram_matrix_reg_Z = gram_matrix_Z + 1e-2 * torch.eye(gram_matrix_Z.shape[0], device="cuda")
+
+
+        #NOTE: This forces singular values to be at most 1; is this OK?
         sigma = torch.sqrt(torch.exp(-self.S.weights ** 2))
         Ux = self.U(X.type_as(sigma))
         Vy = self.V(Y.type_as(sigma))
@@ -144,11 +196,18 @@ class NCPOperator(Module):
         cov_Y = torch.cov(Vy_centered.T)
         cov_XY = cross_cov(Ux_centered.T, Vy_centered.T)
 
+        #FIXME: hack for sqrtmh not to except on cov_X.shape = 0d
+        if Ux.shape[1] == 1:
+            cov_X = cov_X.reshape(1,1)
+            cov_Y = cov_Y.reshape(1,1)
+
         # write in a stable way
         self._sqrt_cov_X_inv = torch.linalg.pinv(sqrt_hermitian(cov_X))
         self._sqrt_cov_Y_inv = torch.linalg.pinv(sqrt_hermitian(cov_Y))
 
         M = self._sqrt_cov_X_inv @ cov_XY @ self._sqrt_cov_Y_inv
+        # M = self._sqrt_cov_X_inv @ (cov_XY - (Ux@torch.diag(sigma)).T @ torch.linalg.lstsq(gram_matrix_reg_Z.type_as(cov_XY), (Vy@torch.diag(sigma))).solution) @ self._sqrt_cov_Y_inv
+        # M = self._sqrt_cov_X_inv @ (cov_XY - Ux_centered.T @ torch.linalg.lstsq(gram_matrix_reg_Z.type_as(cov_XY), Vy_centered).solution) @ self._sqrt_cov_Y_inv
         e_val, sing_vec_l = torch.linalg.eigh(M @ M.T)
         e_val, self._sing_vec_l = filter_reduced_rank_svals(e_val, sing_vec_l)
         self._sing_val = torch.sqrt(e_val)
@@ -205,6 +264,8 @@ class NCPModule(lightning.LightningModule):
         return l
 
     def on_fit_end(self):
+        # FIXME: Should use the entire dataset to compute data statistics
         X, Y = self.batch
-        self.model._compute_data_statistics(X, Y)
+        # self.model._compute_data_statistics(X, Y)
+        self.model._compute_conditional_independence_statistic(X, Y)
         del self.batch

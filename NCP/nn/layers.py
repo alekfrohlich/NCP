@@ -3,14 +3,22 @@ from torch.nn import Conv2d, Dropout, Linear, MaxPool2d, Module, ReLU, Sequentia
 
 
 class SingularLayer(Module):
+    """Singular values of NCP operator."""
     def __init__(self, d):
+        """TODO: What to write here?
+
+        Args:
+            d: FIXME: Should we rename this to 'latent_dim' or 'latent_dimension'?
+        """
         super(SingularLayer, self).__init__()
         self.weights = torch.nn.Parameter(torch.Tensor(torch.normal(mean=0.,std=2./d,size=(d,))), requires_grad=True)
+        # FIXME: Remove this???
         # high = np.sqrt(np.log(4)- np.log(3))
         # low = np.sqrt(np.log(4))
         # self.weights = torch.nn.Parameter(torch.Tensor(low+(high-low)*torch.rand(d,)), requires_grad=True)
 
     def forward(self, x):
+        """#FIXME: What is the output of this for batches? Is it broadcasting correctly?"""
         return x * torch.exp(-self.weights**2)
 
 class MLPBlock(Module):
