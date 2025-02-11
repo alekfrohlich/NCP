@@ -1,3 +1,4 @@
+import importlib
 from typing import NamedTuple
 
 import torch
@@ -168,3 +169,21 @@ def ensure_torch(x):
         return x
     else:
         return from_np(x)
+
+
+def flatten_dict(d: dict, prefix=''):
+    a = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            a.update(flatten_dict(v, prefix=f"{k}/"))
+        else:
+            a[f"{prefix}{k}"] = v
+    return a
+
+
+def class_from_name(module_name, class_name):
+    # load the module, will raise ImportError if module cannot be loaded
+    m = importlib.import_module(module_name)
+    # get the class, will raise AttributeError if class cannot be found
+    c = getattr(m, class_name)
+    return c

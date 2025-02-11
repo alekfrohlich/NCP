@@ -7,7 +7,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.neighbors import KernelDensity
 
 from NCP.metrics import smooth_cdf
-from NCP.utils import from_np, to_np
+from NCP.mysc.utils import from_np, to_np
 
 
 def compute_quantile_robust(values:np.ndarray, cdf:np.ndarray, alpha:Union[str, float]='all', isotonic:bool=True, rescaling:bool=True):
@@ -184,7 +184,7 @@ def compute_coverage_length(quantiles):
 
 def get_mean_from_nf(model, x, N=1000):
     #compute mean after samples N from conditional distribution according to x
-    samples = model.sample(num_samples=N, context=x.repeat(N, 1))[0].detach().cpu().numpy()
+    samples = model.x_sampler(num_samples=N, context=x.repeat(N, 1))[0].detach().cpu().numpy()
     return np.mean(samples)
 
 def get_pdf_from_nf(model:nf.ConditionalNormalizingFlow, x, ys):
